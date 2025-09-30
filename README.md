@@ -1,2 +1,2 @@
 # hanao-camera
-This application use for Exbigtion abo
+This application is use for the Exhibition "Japanese GETA"
