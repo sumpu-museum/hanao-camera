@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Web Overlay Camera</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* --- ここから追加 --- */
+        #splash-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--background-color, #121212);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease-out; /* フェードアウトのアニメーション */
+        }
+
+        #splash-screen img {
+            max-width: 80%;
+            max-height: 80%;
+            object-fit: contain;
+        }
+
+        #splash-screen.hidden {
+            opacity: 0;
+            visibility: hidden; /* アニメーション後、要素を非表示に */
+        }
+        /* --- ここまで追加 --- */
+
+        :root {
+            --background-color: #121212;
+            --text-color: #E0E0E0;
+            --accent-color: #BB86FC;
+            --surface-color: rgba(30, 30, 30, 0.7);
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--background-color);
+            font-family: 'Noto Sans JP', sans-serif;
+            color: var(--text-color);
+        }
+
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex; /* ★初期状態はnoneに変更(JSで制御) */
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+        }
+
+        #camera-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+
+        #camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #overlay-image {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(1);
+            width: 50vw;
+            /* 画面幅に応じてサイズを調整 */
+            max-width: 250px;
+            height: auto;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+            will-change: transform;
+            /* アニメーションを滑らかに */
+            transition: opacity 0.2s;
+        }
+
+        #overlay-image.hidden {
+            opacity: 0;
+        }
+
+        #controls {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            padding: 16px 0 24px 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+            box-sizing: border-box;
+        }
+
+        #hanao-selector {
+            display: flex;
+            gap: 12px;
+            padding: 0 20px;
+            margin-bottom: 24px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            /* Firefox */
+        }
+
+        #hanao-selector::-webkit-scrollbar {
+            display: none;
+            /* Chrome, Safari */
+        }
+
+        .hanao-option {
+            flex-shrink: 0;
+            width: 64px;
+            height: 64px;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            cursor: pointer;
+            object-fit: contain;
+            background-color: var(--surface-color);
+            backdrop-filter: blur(5px);
+            transition: all 0.2s ease-in-out;
+        }
+
+        .hanao-option:hover {
+            transform: scale(1.05);
+        }
+
+        .hanao-option.selected {
+            border-color: var(--accent-color);
+            transform: scale(1.1);
+        }
+
+        #shoot-button-container {
+            text-align: center;
+        }
+
+        #shoot-button {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            border: 4px solid white;
+            background-color: transparent;
+            cursor: pointer;
+            outline: none;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+
+        #shoot-button-inner {
+            width: 56px;
+            height: 56px;
+            background-color: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+
+        #shoot-button:active #shoot-button-inner {
+            transform: scale(0.9);
+        }
+
+        #preview-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 30px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+
+        #preview-container.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #preview-image {
+            width: auto;
+            height: auto;
+            max-width: 90vw;
+            max-height: 65vh;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            object-fit: contain;
+        }
+
+        #preview-controls {
+            display: flex;
+            gap: 20px;
+        }
+
+        .preview-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 120px;
+            height: 50px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        #download-button {
+            background-color: var(--accent-color);
+            color: #000;
+        }
+
+        #back-button {
+            background-color: var(--surface-color);
+            color: var(--text-color);
+        }
+
+        .preview-button:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="splash-screen">
+        <img src="./images/opening.png" alt="Loading...">
+    </div>
+    <div id="app-container" style="display: none;">
+    <div id="camera-container">
+            <video id="camera-video" autoplay playsinline></video>
+            <img id="overlay-image" src="" class="hidden">
+        </div>
+
+        <div id="controls">
+            <div id="hanao-selector"></div>
+            <div id="shoot-button-container">
+                <button id="shoot-button" title="撮影">
+                    <div id="shoot-button-inner"></div>
+                </button>
+            </div>
+        </div>
+
+        <div id="preview-container">
+            <img id="preview-image" src="">
+            <div id="preview-controls">
+                <button id="back-button" class="preview-button">撮り直す</button>
+                <a id="download-link" download><button id="download-button" class="preview-button">保存</button></a>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="photo-canvas" style="display: none;"></canvas>
+
+    <script>
+        // --- 設定項目 ---
+        const hanaoImageFiles = [
+            'hanao1.png', 'hanao2.png', 'hanao3.png', 'hanao4.png', 'hanao5.png',
+            'hanao6.png', 'hanao7.png', 'hanao8.png', 'hanao9.png', 'hanao10.png'
+        ];
+        const hanaoImages = hanaoImageFiles.map(file => ({ src: `./images/${file}` }));
+
+        // --- DOM要素の取得 ---
+        const video = document.getElementById('camera-video');
+        const overlayImage = document.getElementById('overlay-image');
+        const shootButton = document.getElementById('shoot-button');
+        const canvas = document.getElementById('photo-canvas');
+        const hanaoSelector = document.getElementById('hanao-selector');
+        const previewContainer = document.getElementById('preview-container');
+        const previewImage = document.getElementById('preview-image');
+        const downloadLink = document.getElementById('download-link');
+        const backButton = document.getElementById('back-button');
+
+        // --- カメラの初期化 ---
+        async function initCamera() {
+            const constraints = {
+                audio: false,
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                }
+            };
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                video.addEventListener('loadedmetadata', () => {
+                    overlayImage.classList.remove('hidden');
+                });
+            } catch (err) {
+                console.error("カメラのアクセスに失敗しました: ", err);
+                alert("カメラにアクセスできませんでした。ブラウザの設定でカメラの使用を許可してください。");
+            }
+        }
+
+        // --- 鼻緒の選択UIを生成 ---
+        function createHanaoSelector() {
+            hanaoImages.forEach((imgData, index) => {
+                const img = document.createElement('img');
+                img.src = imgData.src;
+                img.classList.add('hanao-option');
+                if (index === 0) {
+                    img.classList.add('selected');
+                    overlayImage.src = imgData.src;
+                }
+                img.addEventListener('click', () => {
+                    overlayImage.src = imgData.src;
+                    document.querySelectorAll('.hanao-option').forEach(opt => opt.classList.remove('selected'));
+                    img.classList.add('selected');
+                });
+                hanaoSelector.appendChild(img);
+            });
+        }
+
+        // --- オーバーレイ画像の操作処理 (ドラッグ＆ピンチ) ---
+        let active = false;
+        let currentX, currentY, initialX, initialY, xOffset = 0, yOffset = 0;
+        let scale = 1.0;
+        let initialDistance = 0;
+
+        function setTransform() {
+            overlayImage.style.transform = `translate(-50%, -50%) translate(${xOffset}px, ${yOffset}px) scale(${scale})`;
+        }
+
+        function dragStart(e) {
+            if (e.type === "touchstart") {
+                initialX = e.touches[0].clientX - xOffset;
+                initialY = e.touches[0].clientY - yOffset;
+            } else {
+                e.preventDefault();
+                initialX = e.clientX - xOffset;
+                initialY = e.clientY - yOffset;
+            }
+            if (e.target === overlayImage) active = true;
+        }
+
+        function dragEnd(e) { active = false; }
+
+        function drag(e) {
+            if (active) {
+                e.preventDefault();
+                if (e.type === "touchmove") {
+                    currentX = e.touches[0].clientX - initialX;
+                    currentY = e.touches[0].clientY - initialY;
+                } else {
+                    currentX = e.clientX - initialX;
+                    currentY = e.clientY - initialY;
+                }
+                xOffset = currentX;
+                yOffset = currentY;
+                setTransform();
+            }
+        }
+
+        function getDistance(p1, p2) {
+            let dx = p1.clientX - p2.clientX; let dy = p1.clientY - p2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        const container = document.getElementById('camera-container');
+        container.addEventListener("mousedown", dragStart);
+        container.addEventListener("mouseup", dragEnd);
+        container.addEventListener("mousemove", drag);
+        container.addEventListener("mouseleave", dragEnd);
+
+        container.addEventListener("touchstart", (e) => {
+            if (e.target === overlayImage) {
+                if (e.touches.length === 1) dragStart(e);
+                else if (e.touches.length === 2) {
+                    active = false;
+                    initialDistance = getDistance(e.touches[0], e.touches[1]);
+                }
+            }
+        });
+
+        container.addEventListener("touchend", dragEnd);
+
+        container.addEventListener("touchmove", (e) => {
+            if (e.touches.length === 1) drag(e);
+            else if (e.touches.length === 2 && initialDistance > 0 && e.target === overlayImage) {
+                e.preventDefault();
+                let newDistance = getDistance(e.touches[0], e.touches[1]);
+                scale *= newDistance / initialDistance;
+                initialDistance = newDistance;
+                setTransform();
+            }
+        });
+
+        // --- 撮影処理 ---
+        shootButton.addEventListener('click', () => {
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const overlayRect = overlayImage.getBoundingClientRect();
+            const videoRect = video.getBoundingClientRect();
+
+            const scaleX = canvas.width / videoRect.width;
+            const scaleY = canvas.height / videoRect.height;
+
+            const drawnWidth = overlayImage.width * scale;
+            const drawnHeight = overlayImage.height * scale;
+
+            const centerX = (overlayRect.left + overlayRect.width / 2 - videoRect.left) * scaleX;
+            const centerY = (overlayRect.top + overlayRect.height / 2 - videoRect.top) * scaleY;
+
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.drawImage(overlayImage, -drawnWidth * scaleX / 2, -drawnHeight * scaleY / 2, drawnWidth * scaleX, drawnHeight * scaleY);
+            ctx.restore();
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            previewImage.src = dataUrl;
+            downloadLink.href = dataUrl;
+            downloadLink.download = `geta-photo-${Date.now()}.jpg`;
+            previewContainer.classList.add('visible');
+        });
+
+        // --- プレビュー画面のボタン処理 ---
+        backButton.addEventListener('click', () => {
+            previewContainer.classList.remove('visible');
+        });
+
+        // --- ここから変更 ---
+        // --- 初期化処理の実行 ---
+        window.addEventListener('load', () => {
+            const splashScreen = document.getElementById('splash-screen');
+            const appContainer = document.getElementById('app-container');
+
+            // 2秒後にスプラッシュスクリーンを非表示にし、アプリを表示・初期化
+            setTimeout(() => {
+                // スプラッシュスクリーンに .hidden クラスを追加してフェードアウトを開始
+                splashScreen.classList.add('hidden');
+                
+                // アプリのメインコンテナを表示
+                // 元のdisplayプロパティが'flex'なので'flex'を指定
+                appContainer.style.display = 'flex';
+
+                // アプリの初期化処理を実行
+                initCamera();
+                createHanaoSelector();
+
+                // CSSのtransition完了後、splash-screen要素をDOMから削除または完全に非表示にする
+                splashScreen.addEventListener('transitionend', () => {
+                    splashScreen.style.display = 'none';
+                }, { once: true }); // イベントリスナーを一度だけ実行するオプション
+
+            }, 2000); // 2000ミリ秒 = 2秒
+        });
+        // --- ここまで変更 ---
+    </script>
+</body>
+
+</html>
